@@ -3,9 +3,9 @@ library(tidyverse)
 library(optmatch)
 library(stringr)
 ########################################################################################
-skate<- read.csv("/Users/seanfloersch/FloStrength/FloStrengthHistoryApp/NHLPlayersAT")%>%
+skate<- read.csv("/Users/seanfloersch/FloStrength/HockeyApp/NHLPlayersAT.csv")%>%
   filter(yearID>2000)%>%
-  select(Player,yearID,Age,Tm,FloStrength,GP)
+  select(Player,yearID,Age,Team,FloStrength,GP)
 lyskate<-skate%>%
   mutate(yearID=yearID+1)%>%
   select(Player,yearID,"LYFS"=FloStrength,"LYGP"=GP)
@@ -54,10 +54,10 @@ fy<-fy%>%
 skatepred<-rbind(fy,sy,comp,ml)
 
 skateteam<-skatepred%>%
-  group_by(yearID,Tm,FSPred)%>%
+  group_by(yearID,Team,FSPred)%>%
   slice(1:2)%>%
   ungroup()%>%
-  group_by(yearID,Tm)%>%
+  group_by(yearID,Team)%>%
   mutate(WFS=FSPred*(GPPred/sum(GPPred)))%>%
   arrange(-WFS)%>%
   slice(1:20)%>%
@@ -67,10 +67,10 @@ skateteam<-skatepred%>%
   group_by(yearID)%>%
   mutate(PlayPred=(WFS-mean(WFS))/sd(WFS))%>%
   ungroup%>%
-  select("Team"="Tm",yearID,PlayPred)
+  select("Team",yearID,PlayPred)
   
 ########################################################################################
-teams<- read.csv("/Users/seanfloersch/FloStrength/FloStrengthHistoryApp/NHLTeamsAT")%>%
+teams<- read.csv("/Users/seanfloersch/FloStrength/HockeyApp/NHLTeamsAT.csv")%>%
   filter(yearID>2000)%>%
   select(Team, yearID, FloStrength,WinPct)
 lagyear<-teams%>%
@@ -81,16 +81,18 @@ predteam<-left_join(predteam,skateteam,by=c("Team","yearID"))%>%na.omit()
 linmod<-lm(WinPct~LYFS+PlayPred,data = predteam)
 ########################################################################################
 TeamPred<-teams%>%
-  filter(yearID==2023)%>%
+  filter(yearID==2024)%>%
   select(Team,yearID,"LYFS"=FloStrength)
+TeamPred<-TeamPred%>%
+  mutate(Team=ifelse(Team=="ARI","UTA",Team))
 getRoster <- function(team){
   url <- str_c("https://www.hockey-reference.com/teams/",team,"/index.html")
   h <- read_html(url) 
-  Player <- html_nodes(h, ".iz+ .left") %>% html_text
+  Player <- html_nodes(h, ".center+ td.left") %>% html_text
   Age<-html_nodes(h,".center+ td.center")%>%html_text%>%as.numeric
   df <- data.frame(Player,Age) %>%
     mutate(Team = team) %>%
-    mutate(yearID = 2023)
+    mutate(yearID = 2024)
   return(df)
 }
 teams<-unique(TeamPred$Team)
@@ -100,11 +102,11 @@ roster<-rbind(roster1,roster2)%>%
   mutate(Player = str_remove(Player, "\\s\\(\\C\\)"))
 
 
-lyskate<-read.csv("/Users/seanfloersch/FloStrength/FloStrengthHistoryApp/NHLPlayersAT")%>%
-  filter(yearID==2023)%>%
+lyskate<-read.csv("/Users/seanfloersch/FloStrength/HockeyApp/NHLPlayersAT.csv")%>%
+  filter(yearID==2024)%>%
   select(Player,"LYFS"=FloStrength,"LYGP"=GP)
-tyskate<-read.csv("/Users/seanfloersch/FloStrength/FloStrengthHistoryApp/NHLPlayersAT")%>%
-  filter(yearID==2022)%>%
+tyskate<-read.csv("/Users/seanfloersch/FloStrength/HockeyApp/NHLPlayersAT.csv")%>%
+  filter(yearID==2023)%>%
   select(Player,"TYFS"=FloStrength,"TYGP"=GP)
 skatepred<-left_join(roster,lyskate,by="Player")
 skatepred<-left_join(skatepred,tyskate,by="Player")
@@ -163,8 +165,8 @@ TeamPred<-TeamPred%>%
 TeamGen<-TeamPred%>%
   arrange(Team)
 Team<-TeamGen$Team
-Conf<-c(2,2,1,1,1,1,2,2,2,2,1,2,1,2,2,1,1,2,1,1,1,1,1,2,2,2,1,1,2,2,2,1)
-Div<-c(4,3,1,1,2,2,4,3,3,3,1,4,1,4,3,1,2,3,2,2,1,2,2,4,4,3,1,1,4,4,3,2)
+Conf<-c(2,1,1,1,1,2,2,2,2,1,2,1,2,2,1,1,2,1,1,1,1,1,2,2,2,1,1,2,2,2,2,1)
+Div<-c(4,1,1,2,2,4,3,3,3,1,4,1,4,3,1,2,3,2,2,1,2,2,4,4,3,1,1,3,4,4,3,2)
 TeamGen<-data.frame(Team,Conf,Div)%>%
   mutate(Conf=ifelse(Conf==2,"West","East"))%>%
   mutate(Div=ifelse(Div==1,"Atlantic",Div))%>%
@@ -178,9 +180,5 @@ skatepred<-left_join(skatepred,TeamGen,by = "Team")%>%
   mutate(GPPred=round(GPPred,0))%>%
   mutate(ValPred=round((GPPred/27)*FSPred,2))%>%
   select(Player,Age,Team,GPPred,FSPred,ValPred,Conf,Div)
-write_csv(skatepred,"~/FloStrength/FloStrengthFuture/NHL/SkatePred23.csv")
-write_csv(TeamPred,"~/FloStrength/FloStrengthFuture/NHL/TeamPred23.csv")
-
-write_csv(skatepred,"~/FloStrength/NFLFloStrength/SkatePred23.csv")
-write_csv(TeamPred,"~/FloStrength/NFLFloStrength/TeamPred23.csv")
-write_csv(TeamGen,"~/FloStrength/NHLFloStrength/TeamGeneral.csv")
+write_csv(skatepred,"~/FloStrength/HockeyApp/SkatePred24.csv")
+write_csv(TeamPred,"~/FloStrength/HockeyApp/TeamPred24.csv")

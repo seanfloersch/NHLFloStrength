@@ -1,5 +1,107 @@
 getOldNHLPlayer <- function(year){
-  if(year<2008){
+  if(year>2007){
+    h <- read_html(str_c("https://www.hockey-reference.com/leagues/NHL_",year,"_skaters.html")) 
+    stats <- html_nodes(h, "td") %>% html_text
+    len <- length(stats) / 30
+    df<- data.frame()
+    for (i in c(1:len)) {
+      for (j in c(1:30)){
+        marker = j + (i -1)* 30
+        df[i,j]<- stats[marker]
+      }
+    }
+    colnames(df)<- (html_nodes(h, ".right+ .poptip , .poptip.right , .center+ .poptip , .left+ .poptip , .poptip.left") %>% html_text)[7:36]
+    dfplay<- df %>%
+      group_by(Player)%>%
+      mutate(Team = last(Team))%>%
+      slice(1)%>%
+      ungroup()%>%
+      select(Player,Age,Team,Pos,GP,G,A,PTS,`+/-`,"S"=SOG,ATOI)%>%
+      mutate(Pos1=Pos)
+    for (i in c(2,5:10)) {
+      dfplay[i] <- as.numeric(unlist(dfplay[i]))
+    }
+    ind <- which(dfplay$Pos == "LW" | (dfplay$Pos == "RW" | dfplay$Pos == "F"))
+    dfplay$Pos1[ind] = "W"
+    dfplay <- dfplay %>%
+      mutate(PTSpm =(.0001 + ( G + .5 * A)/GP)) %>%
+      mutate(Def = .00001+(`+/-`/GP)-PTSpm)%>%
+      mutate(Shooting = (((G*G/(S+.00001)) + 0.00001))) %>%
+      mutate(ATOI1=as.numeric(str_split(ATOI, "\\:", simplify=T)[,1]))%>%
+      mutate(ATOI2=as.numeric(str_split(ATOI, "\\:", simplify=T)[,2])/60)%>%
+      mutate(ATOI=ATOI1+ATOI2)%>%
+      select(-ATOI1,-ATOI2)%>%
+      filter(GP>8 &ATOI>12) %>%
+      filter(Pos != "G")%>%
+      mutate(yearID = year) %>%
+      group_by(Pos1) %>%
+      mutate(PtScore = (PTSpm - mean(PTSpm)) / sd(PTSpm))%>%
+      mutate(DefScore = (Def - mean(Def)) / sd(Def))%>%
+      mutate(ShotScore = (Shooting - mean(Shooting)) / sd(Shooting))%>%
+      ungroup %>%
+      group_by(Team) %>%
+      mutate(DefScore = (DefScore - mean(DefScore)) / sd(DefScore))%>%
+      ungroup %>%
+      mutate(FloStrength = NA)
+    dfC <- dfplay %>%
+      filter(Pos1 == "C"|Pos1=="W") %>%
+      mutate(FloStrength = (2*PtScore +.7 * ShotScore))%>%
+      mutate(FloStrength = (FloStrength - mean(FloStrength)) / sd(FloStrength)) %>%
+      mutate(Value = FloStrength * (GP/31))
+    dfD <- dfplay %>%
+      filter(Pos1 == "D") %>%
+      mutate(PtScore = (6+PtScore)^.15)%>%
+      mutate(PtScore = (PtScore - mean(PtScore)) / sd(PtScore))%>%
+      mutate(FloStrength = (3* PtScore +2 *DefScore))%>%
+      mutate(FloStrength = (FloStrength - mean(FloStrength)) / sd(FloStrength)) %>%
+      mutate(Value = FloStrength * (GP/29))
+    dfplayer <- rbind(dfC, dfD)%>%
+      mutate(PTS=G+A)%>%
+      mutate(SV=NA)%>%
+      mutate(SavePer=NA)%>%
+      select(Player,Age,Team,Pos, GP,ATOI,G,A,PTS,S,"+/-",SV,SavePer,FloStrength,Value)
+    h <- read_html(str_c("https://www.hockey-reference.com/leagues/NHL_",year,"_goalies.html")) 
+    stats <- html_nodes(h, "td") %>% html_text
+    len <- length(stats) / 25
+    dfgoal<- data.frame()
+    for (i in c(1:len)) {
+      for (j in c(1:25)){
+        marker = j + (i -1)* 25
+        dfgoal[i,j]<- stats[marker]
+      }
+    }
+    colnames(dfgoal) <- (html_nodes(h, ".left+ .poptip , .sort_default_asc.left , .center+ .poptip") %>% html_text)[1:25]
+    for (i in c(2,4:25)) {
+      dfgoal[i] <- as.numeric(unlist(dfgoal[i]))
+    }
+    dfgoal<- dfgoal %>%
+      group_by(Player)%>%
+      mutate(Team = last(Tm))%>%
+      slice(1)%>%
+      ungroup()
+    dfgoal1<-dfgoal %>%
+      mutate(Pos = "G") %>%
+      mutate(FloStrength = (SV/SA)) %>%
+      filter(SA>4*max(GP))%>%
+      mutate(SavePer=SV/SA)%>%
+      group_by(Pos) %>%
+      mutate(FloStrength = (FloStrength - mean(FloStrength)) / sd(FloStrength)) %>%
+      ungroup() %>%
+      mutate(Value = FloStrength * (SA/ 428)) %>%
+      mutate(ATOI=(MIN/GP))%>%
+      select(Player, Age, Team, Pos, GP,SV,SavePer,"ATOI",FloStrength,Value) %>%
+      mutate(G = NA)%>%
+      mutate(A = NA)%>%
+      mutate(`+/-` = NA)%>%
+      mutate(S = NA)%>%
+      mutate(PTS = NA)
+    dfplayer <- rbind(dfplayer, dfgoal1) %>%
+      mutate(yearID = year)%>%
+      mutate(FloStrength=round(FloStrength,3))%>%
+      mutate(SavePer=round(SavePer,3))%>%
+      mutate(Value=round(Value,2))%>%
+      mutate(ATOI=round(ATOI,2))
+  }else{
     h <- read_html(str_c("https://www.hockey-reference.com/leagues/NHL_",year,"_skaters.html")) 
     stats <- html_nodes(h, "td") %>% html_text
     len <- length(stats) / 22
@@ -10,145 +112,127 @@ getOldNHLPlayer <- function(year){
         df[i,j]<- stats[marker]
       }
     }
-    colnames(df)<- html_nodes(h, ".right+ .poptip , .poptip.right , .center+ .poptip , .left+ .poptip , .poptip.left") %>% html_text
-    df<-df[,c(1:11,15,19:21)]
+    colnames(df)<- (html_nodes(h, ".right+ .poptip , .poptip.right , .center+ .poptip , .left+ .poptip , .poptip.left") %>% html_text)[5:26]
     dfplay<- df %>%
       group_by(Player)%>%
-      mutate(Tm = last(Tm))%>%
-      slice(1)
-    for (i in c(2,5:15)) {
+      mutate(Team = last(Team))%>%
+      slice(1)%>%
+      ungroup()%>%
+      select(Player,Age,Team,Pos,GP,G,A,PTS,`+/-`,"S"=SOG,ATOI)%>%
+      mutate(Pos1=Pos)
+    for (i in c(2,5:10)) {
       dfplay[i] <- as.numeric(unlist(dfplay[i]))
     }
-  }else{
-    h <- read_html(str_c("https://www.hockey-reference.com/leagues/NHL_",year,"_skaters.html")) 
+    ind <- which(dfplay$Pos == "LW" | (dfplay$Pos == "RW" | dfplay$Pos == "F"))
+    dfplay$Pos1[ind] = "W"
+    dfplay <- dfplay %>%
+      filter(Pos!="G")%>%
+      mutate(PTSpm =(.0001 + ( G + .5 * A)/GP)) %>%
+      mutate(Def = .00001+(`+/-`/GP)-PTSpm)%>%
+      mutate(Shooting = (((G*G/(S+.00001)) + 0.00001))) %>%
+      mutate(ATOI1=ifelse(is.na(as.numeric(ATOI))==TRUE,0,as.numeric(str_split(ATOI, "\\:", simplify=T)[,1])))%>%
+      mutate(ATOI2=ifelse(is.na(as.numeric(ATOI))==TRUE,0,as.numeric(str_split(ATOI, "\\:", simplify=T)[,2])/60))%>%
+      mutate(ATOI=ATOI1+ATOI2)%>%
+      select(-ATOI1,-ATOI2)%>%
+      filter(GP>11) %>%
+      mutate(yearID = year) %>%
+      group_by(Pos1) %>%
+      mutate(PtScore = (PTSpm - mean(PTSpm)) / sd(PTSpm))%>%
+      mutate(DefScore = (Def - mean(Def)) / sd(Def))%>%
+      mutate(ShotScore = (Shooting - mean(Shooting)) / sd(Shooting))%>%
+      ungroup %>%
+      group_by(Team) %>%
+      mutate(DefScore = (DefScore - mean(DefScore)) / sd(DefScore))%>%
+      ungroup %>%
+      mutate(FloStrength = NA)
+    dfC <- dfplay %>%
+      filter(Pos1 == "C"|Pos1=="W") %>%
+      mutate(FloStrength = (2*PtScore +.7 * ShotScore))%>%
+      mutate(FloStrength = (FloStrength - mean(FloStrength)) / sd(FloStrength)) %>%
+      mutate(Value = FloStrength * (GP/31))
+    dfD <- dfplay %>%
+      filter(Pos1 == "D") %>%
+      mutate(PtScore = (6+PtScore)^.15)%>%
+      mutate(PtScore = (PtScore - mean(PtScore)) / sd(PtScore))%>%
+      mutate(FloStrength = (3* PtScore +2 *DefScore))%>%
+      mutate(FloStrength = (FloStrength - mean(FloStrength)) / sd(FloStrength)) %>%
+      mutate(Value = FloStrength * (GP/29))
+    dfplayer <- rbind(dfC, dfD)%>%
+      mutate(PTS=G+A)%>%
+      mutate(SV=NA)%>%
+      mutate(SavePer=NA)%>%
+      select(Player,Age,Team,Pos, GP,ATOI,G,A,PTS,S,"+/-",SV,SavePer,FloStrength,Value)
+    h <- read_html(str_c("https://www.hockey-reference.com/leagues/NHL_",year,"_goalies.html")) 
     stats <- html_nodes(h, "td") %>% html_text
-    len <- length(stats) / 27
-    df<- data.frame()
+    len <- length(stats) / 25
+    dfgoal<- data.frame()
     for (i in c(1:len)) {
-      for (j in c(1:27)){
-        marker = j + (i -1)* 27
-        df[i,j]<- stats[marker]
+      for (j in c(1:25)){
+        marker = j + (i -1)* 25
+        dfgoal[i,j]<- stats[marker]
       }
     }
-    colnames(df)<- html_nodes(h, ".right+ .poptip , .poptip.right , .center+ .poptip , .left+ .poptip , .poptip.left") %>% html_text
-    df <- df[,c(1:11,15,19:21)]
-    dfplay<- df %>%
+    colnames(dfgoal) <- (html_nodes(h, ".left+ .poptip , .sort_default_asc.left , .center+ .poptip") %>% html_text)[1:25]
+    for (i in c(2,4:25)) {
+      dfgoal[i] <- as.numeric(unlist(dfgoal[i]))
+    }
+    dfgoal<- dfgoal %>%
       group_by(Player)%>%
-      mutate(Tm = last(Tm))%>%
-      slice(1)
-    for (i in c(2,5:15)) {
-      dfplay[i] <- as.numeric(unlist(dfplay[i]))
-    }
+      mutate(Team = last(Tm))%>%
+      slice(1)%>%
+      ungroup()
+    dfgoal1<-dfgoal %>%
+      mutate(Pos = "G") %>%
+      mutate(FloStrength = (SV/SA)) %>%
+      filter(SA>4*max(GP))%>%
+      mutate(SavePer=SV/SA)%>%
+      group_by(Pos) %>%
+      mutate(FloStrength = (FloStrength - mean(FloStrength)) / sd(FloStrength)) %>%
+      ungroup() %>%
+      mutate(Value = FloStrength * (SA/ 428)) %>%
+      mutate(ATOI=(MIN/GP))%>%
+      select(Player, Age, Team, Pos, GP,SV,SavePer,"ATOI",FloStrength,Value) %>%
+      mutate(G = NA)%>%
+      mutate(A = NA)%>%
+      mutate(`+/-` = NA)%>%
+      mutate(S = NA)%>%
+      mutate(PTS = NA)
+    dfplayer <- rbind(dfplayer, dfgoal1) %>%
+      mutate(yearID = year)%>%
+      mutate(FloStrength=round(FloStrength,3))%>%
+      mutate(SavePer=round(SavePer,3))%>%
+      mutate(Value=round(Value,2))%>%
+      mutate(ATOI=round(ATOI,2))
   }
-  ind <- which(dfplay$Pos == "LW" | (dfplay$Pos == "RW" | dfplay$Pos == "F"))
-  dfplay$Pos[ind] = "W"
-  dfplay <- dfplay %>%
-    mutate(PTSpm =(.0001 + ( G + .5 * A)/GP)) %>%
-    mutate(Def = .00001+(`+/-`/GP)-PTSpm)%>%
-    mutate(Shooting = (((G*G/(S+.00001)) + 0.00001))) %>%
-    filter(GP>10) %>%
-    mutate(yearID = year) %>%
-    group_by(Pos) %>%
-    mutate(PtScore = (PTSpm - mean(PTSpm)) / sd(PTSpm))%>%
-    mutate(DefScore = (Def - mean(Def)) / sd(Def))%>%
-    mutate(ShotScore = (Shooting - mean(Shooting)) / sd(Shooting))%>%
-    ungroup %>%
-    group_by(Tm) %>%
-    mutate(DefScore = (DefScore - mean(DefScore)) / sd(DefScore))%>%
-    ungroup %>%
-    mutate(FloStrength = NA)
-  dfC <- dfplay %>%
-    filter(Pos == "C"|Pos == "W") %>%
-    mutate(FloStrength = (2*PtScore +.7 * ShotScore))%>%
-    mutate(FloStrength = (FloStrength - mean(FloStrength)) / sd(FloStrength)) %>%
-    mutate(Value = FloStrength * (GP/20))
-  dfD <- dfplay %>%
-    filter(Pos == "D") %>%
-    mutate(PtScore = (6+PtScore)^.15)%>%
-    mutate(PtScore = (PtScore - mean(PtScore)) / sd(PtScore))%>%
-    mutate(FloStrength = (3* PtScore +2 *DefScore))%>%
-    group_by(Pos) %>%
-    mutate(FloStrength = (FloStrength - mean(FloStrength)) / sd(FloStrength)) %>%
-    ungroup() %>%
-    mutate(Value = FloStrength * (GP/20))
-  dfplayer <- rbind(dfC, dfD)%>%
-    select(Player,Age,Tm,Pos, GP,G,A,"+/-",S,PtScore,DefScore,ShotScore,FloStrength,Value)%>%
-    mutate(SV=0)%>%
-    mutate(SA=0)
-  h <- read_html(str_c("https://www.hockey-reference.com/leagues/NHL_",year,"_goalies.html")) 
-  stats <- html_nodes(h, "td") %>% html_text
-  len <- length(stats) / 25
-  dfgoal<- data.frame()
-  for (i in c(1:len)) {
-    for (j in c(1:25)){
-      marker = j + (i -1)* 25
-      dfgoal[i,j]<- stats[marker]
-    }
-  }
-  colnames(dfgoal) <- (html_nodes(h, ".left+ .poptip , .sort_default_asc.left , .center+ .poptip") %>% html_text)[1:25]
-  for (i in c(2,4:25)) {
-    dfgoal[i] <- as.numeric(unlist(dfgoal[i]))
-  }
-  dfgoal<- dfgoal %>%
-    group_by(Player)%>%
-    mutate(Tm = last(Tm))%>%
-    slice(1)%>%
-    ungroup()
-  dfgoal1<-dfgoal %>%
-    mutate(Pos = "G") %>%
-    mutate(FloStrength = (SV/SA)) %>%
-    filter(SA>4*max(GP))%>%
-    select(Player, Age, Tm, Pos, GP,SV,SA,FloStrength) %>%
-    group_by(Pos) %>%
-    mutate(FloStrength = (FloStrength - mean(FloStrength)) / sd(FloStrength)) %>%
-    ungroup() %>%
-    mutate(Value = FloStrength * (SA/ 300)) %>%
-    mutate(G = 0)%>%
-    mutate(A = 0)%>%
-    mutate(`+/-` = 0)%>%
-    mutate(DefScore = 0)%>%
-    mutate(ShotScore = 0)%>%
-    mutate(PtScore = 0)%>%
-    mutate(S = 0)
-  dfplayer <- rbind(dfplayer, dfgoal1) %>%
-    mutate(yearID = year)
+
   return(dfplayer)
 }
-v<-map_df(.x=c(2018:2023),.f=getOldNHLPlayer)
-w<-map_df(.x=c(2008:2017),.f=getOldNHLPlayer)
-x<-map_df(.x=c(1998:2004,2006,2007),.f=getOldNHLPlayer)
+v<-map_df(.x=c(2017:2024),.f=getOldNHLPlayer)
+w<-map_df(.x=c(2009:2016),.f=getOldNHLPlayer)
+x<-map_df(.x=c(1998:2004,2006:2008),.f=getOldNHLPlayer)
 z<-map_df(.x=c(1988:1997),.f=getOldNHLPlayer)
 y<-map_df(.x=c(1978:1987),.f=getOldNHLPlayer)
 u<-map_df(.x=c(1968:1977),.f=getOldNHLPlayer)
-df<-rbind(u,v,w,x,y,z)
+df<-rbind(u,v,w,x,y,z)%>%
+  mutate(Value=ifelse(Pos=="G",round(Value*.7,2),Value))
   
 df<-df%>%
-  mutate(Tm=ifelse(Tm=="WIN","WPG",Tm))%>%
+  mutate(Team=ifelse(Team=="WIN","WPG",Team))%>%
   mutate(Player = str_remove(Player, "\\*"))%>%
-  mutate(Value = ifelse(Pos=="G",.7*Value,Value))%>%
-  mutate(Value = ifelse(Pos=="W",Value*.65,Value))%>%
-  mutate(Value = ifelse(Pos=="D",Value*.7,Value))%>%
-  mutate(Value = ifelse(Pos=="C",Value*.65,Value))
-careers <- df %>%
-  group_by(Player) %>%
-  mutate(FloStrength = sum(GP*FloStrength)/sum(GP))%>%
-  mutate(DefScore = sum(GP*DefScore)/sum(GP))%>%
-  mutate(ShotScore = sum(GP*ShotScore)/sum(GP))%>%
-  mutate(PtScore = sum(GP*PtScore)/sum(GP))%>%
-  mutate(Value = sum(Value))%>%
-  mutate(GP = sum(GP))%>%
-  mutate(G = sum(G))%>%
-  mutate(A = sum(A))%>%
-  mutate(S = sum(S))%>%
-  mutate(PlusMinus= sum(`+/-`))%>%
-  mutate(SV= sum(SV))%>%
-  mutate(SA= sum(SA))%>%
-  slice(1)%>%
-  ungroup()%>%
-  select(-`+/-`)%>%
-  filter(GP>100)
-write_csv(df, "/Users/seanfloersch/FloStrength/FloStrengthHistoryApp/NHLPlayersAT")
-write_csv(careers, "/Users/seanfloersch/FloStrength/FloStrengthHistoryApp/NHLPlayerCarAT")
+  mutate(Team=ifelse(Team=="MNS","DAL",Team))%>%
+  mutate(Team=ifelse(Team=="OAK","CLE",Team))%>%
+  mutate(Team=ifelse(Team=="CBH","CHI",Team))%>%
+  mutate(Team=ifelse(Team=="CGS","CLE",Team))%>%
+  mutate(Team=ifelse(Team=="ATF","CGY",Team))%>%
+  mutate(Team=ifelse(Team=="KCS","NJD",Team))%>%
+  mutate(Team=ifelse(Team=="CLR","NJD",Team))%>%
+  mutate(Team=ifelse(Team=="ATL","WPG",Team))%>%
+  mutate(Team=ifelse(Team=="PHX","ARI",Team))%>%
+  mutate(Team=ifelse(Team=="MDA","ANA",Team))%>%
+  mutate(Team=ifelse(Team=="HAR","CAR",Team))%>%
+  mutate(Team=ifelse(Team=="QUE","COL",Team))
+
+write_csv(df, "/Users/seanfloersch/FloStrength/HockeyApp/NHLPlayersAT.csv")
 
 ###########################################################
 #################Teams#####################################
@@ -158,11 +242,11 @@ NHLTeamHistory <- read_excel("~/Downloads/NHLTeamHistory.xlsx")%>%
   mutate(Team = str_remove(Team, "\\*"))%>%
   mutate(SOW=NA)%>%
   mutate(SOL=NA)
-NHLTeamHistory1 <- read_excel("~/Downloads/NHLModernTeams.xlsx")%>%
+NHLTeamHistory1 <- read_excel("~/Downloads/NHLModernTeam1.xlsx")%>%
   mutate(Team = str_remove(Team, "\\*"))%>%
-  mutate(T=NA)
+  mutate(T=0)
 nhlteams<-rbind(NHLTeamHistory,NHLTeamHistory1)
-Teams <- c("Mighty Ducks of Anaheim"="MDA","Minnesota North Stars" = "MNS","Oakland Seals"="OAK","Chicago Black Hawks"="CBH","California Golden Seals"="CGS","Atlanta Flames" ="ATF","Kansas City Scouts"="KCS","Cleveland Barons"="CLE","Colorado Rockies"="CLR","Hartford Whalers"="HAR","Quebec Nordiques"="QUE","Anaheim Ducks" = "ANA","Arizona Coyotes" = "ARI","Boston Bruins" = "BOS","Buffalo Sabres" = "BUF","Calgary Flames" = "CGY","Carolina Hurricanes" = "CAR","Chicago Blackhawks" = "CHI","Colorado Avalanche" = "COL","Columbus Blue Jackets" = "CBJ","Dallas Stars" = "DAL","Detroit Red Wings" = "DET","Edmonton Oilers" = "EDM","Florida Panthers" = "FLA","Los Angeles Kings" = "LAK","Minnesota Wild" = "MIN","Montreal Canadiens" = "MTL","Nashville Predators" = "NSH","New Jersey Devils" = "NJD","New York Islanders" = "NYI","New York Rangers" = "NYR","Ottawa Senators" = "OTT","Philadelphia Flyers" = "PHI","Pittsburgh Penguins" = "PIT","San Jose Sharks" = "SJS","Seattle Kraken" = "SEA","St. Louis Blues" = "STL","Tampa Bay Lightning" = "TBL","Toronto Maple Leafs" = "TOR","Vancouver Canucks" = "VAN","Vegas Golden Knights"="VEG","Washington Capitals" = "WSH", "Winnipeg Jets"="WPG","Atlanta Thrashers"="ATL","Phoenix Coyotes"="PHX")
+Teams <- c("Mighty Ducks of Anaheim"="ANA","Minnesota North Stars" = "DAL","Oakland Seals"="CLE","Chicago Black Hawks"="CHI","California Golden Seals"="CLE","Atlanta Flames" ="CGY","Kansas City Scouts"="NJD","Cleveland Barons"="CLE","Colorado Rockies"="NJD","Hartford Whalers"="CAR","Quebec Nordiques"="COL","Anaheim Ducks" = "ANA","Arizona Coyotes" = "ARI","Boston Bruins" = "BOS","Buffalo Sabres" = "BUF","Calgary Flames" = "CGY","Carolina Hurricanes" = "CAR","Chicago Blackhawks" = "CHI","Colorado Avalanche" = "COL","Columbus Blue Jackets" = "CBJ","Dallas Stars" = "DAL","Detroit Red Wings" = "DET","Edmonton Oilers" = "EDM","Florida Panthers" = "FLA","Los Angeles Kings" = "LAK","Minnesota Wild" = "MIN","Montreal Canadiens" = "MTL","Nashville Predators" = "NSH","New Jersey Devils" = "NJD","New York Islanders" = "NYI","New York Rangers" = "NYR","Ottawa Senators" = "OTT","Philadelphia Flyers" = "PHI","Pittsburgh Penguins" = "PIT","San Jose Sharks" = "SJS","Seattle Kraken" = "SEA","St. Louis Blues" = "STL","Tampa Bay Lightning" = "TBL","Toronto Maple Leafs" = "TOR","Vancouver Canucks" = "VAN","Vegas Golden Knights"="VEG","Washington Capitals" = "WSH", "Winnipeg Jets"="WPG","Atlanta Thrashers"="WPG","Phoenix Coyotes"="ARI")
 nhlteams$Team <-as.character(Teams[nhlteams$Team])
 NHLMaster <- nhlteams %>%
   mutate(GS = GF) %>%
@@ -174,45 +258,48 @@ NHLMaster <- nhlteams %>%
   mutate(Defense = `GA/G` + 25 * SavePer) %>%
   mutate(Discapline = (1-`PP%`) - `PK%`) %>%
   mutate(Offense = (GS + .25 * S + `PP%`) / GP) %>%
-  select(Team,yearID,GP,WinPct,Offense, Defense, Discapline,GS,GA,SPG) %>%
+  mutate("OTL/T"=OL+T)%>%
+  select(Team,yearID,GP,W,L,"OTL/T",PTS,WinPct,Offense, Defense, Discapline,GS,GA,"SHO"=SO,"Pen"=PPOA) %>%
   group_by(yearID)%>%
   mutate(Defense = -1 *((Defense - mean(Defense)) / sd(Defense))) %>%
   mutate(Offense = (Offense - mean(Offense)) / sd(Offense)) %>%
   mutate(Discapline = -1*((Discapline - mean(Discapline)) / sd(Discapline))) %>%
   mutate(TeamScore = 0.52606 + 0.04984* Offense + 0.05690* Defense + 0.01373 *Discapline)%>%
+  mutate(Defense=round(Defense,3))%>%
+  mutate(Offense=round(Offense,3))%>%
+  mutate(Discapline=round(Discapline,3))%>%
+  mutate(TeamScore=round(TeamScore,3))%>%
   ungroup()
 linny<-lm(WinPct~Offense+Defense+Discapline, data = NHLMaster)
 
-testdf<- df%>% group_by(Tm,Pos,yearID)%>% mutate(mvp= sum(Value))%>% slice(1) %>% ungroup()%>% filter(Tm!="TOT")%>% select(Tm,Pos,mvp,yearID)
-C<-testdf%>% filter(Pos == "C")%>% mutate(CMVP=mvp)%>%select(Tm,yearID, CMVP)
-D<-testdf%>% filter(Pos == "D")%>% mutate(DMVP=mvp)%>%select(Tm,yearID, DMVP)
-G<-testdf%>% filter(Pos == "G")%>% mutate(GMVP=1.728*mvp)%>%select(Tm,yearID, GMVP)
-W<-testdf%>% filter(Pos == "W")%>% mutate(WMVP=mvp)%>%select(Tm,yearID, WMVP)
-testdf<- left_join(C,D,by = c("Tm","yearID"))
-testdf<- left_join(testdf,G,by = c("Tm","yearID"))
-testdf<- left_join(testdf,W,by = c("Tm","yearID"))%>%
+testdf<- df%>% group_by(Team,Pos,yearID)%>% mutate(mvp= sum(Value))%>% slice(1) %>% ungroup()%>% filter(Team!="TOT")%>% select(Team,Pos,mvp,yearID)
+C<-testdf%>% filter(Pos == "C")%>% mutate(CMVP=mvp)%>%select(Team,yearID, CMVP)
+D<-testdf%>% filter(Pos == "D")%>% mutate(DMVP=mvp)%>%select(Team,yearID, DMVP)
+G<-testdf%>% filter(Pos == "G")%>% mutate(GMVP=mvp)%>%select(Team,yearID, GMVP)
+W<-testdf%>% filter(!Pos %in% c("C","D","G"))%>% group_by(Team,yearID)%>%mutate(WMVP=sum(mvp))%>%slice(1)%>%ungroup()%>%select(Team,yearID, WMVP)
+testdf<- left_join(C,D,by = c("Team","yearID"))
+testdf<- left_join(testdf,G,by = c("Team","yearID"))
+testdf<- left_join(testdf,W,by = c("Team","yearID"))%>%
   mutate(GMVP = ifelse(is.na(GMVP)==TRUE,-5,GMVP))%>%
   na.omit%>%
   mutate(PlayerScore = CMVP+DMVP+GMVP+WMVP)%>%
   group_by(yearID)%>%
   mutate(PlayerScore = (PlayerScore-mean(PlayerScore))/sd(PlayerScore))%>%
   ungroup()%>%
-  select("Team"="Tm",yearID, PlayerScore)
+  select("Team",yearID, PlayerScore)
 NHLMaster<- left_join(NHLMaster, testdf, by = c("Team","yearID"))%>%
-  mutate(PlayerScore = 0.52606+0.09086*PlayerScore)%>%
-  na.omit()
+  mutate(PlayerScore = round(.527398+0.087875*PlayerScore,3))
 
 linny<-lm(WinPct~PlayerScore, data = NHLMaster)
 linmod<-lm(WinPct~PlayerScore+TeamScore,data = NHLMaster)
 NHLMaster<- NHLMaster %>%
-  mutate(FloStrength = predict(linmod))
+  mutate(FloStrength = round(-.05664+.75494*TeamScore+.35434*PlayerScore,3))
 getNHLSched<- function(year){
   h <- read_html(str_c("https://www.hockey-reference.com/leagues/NHL_",year,"_games.html")) 
-  away <- html_nodes(h, ".left+ td.left") %>% html_text 
-  home <- html_nodes(h, "td:nth-child(4)") %>% html_text
-  as <- html_nodes(h, ".right:nth-child(3)") %>% html_text%>% as.numeric()
-  hs <- html_nodes(h, ".right~ .left+ .right") %>% html_text%>% as.numeric()
-  date <- html_nodes(h, "th a") %>% html_text
+  away <- html_nodes(h, "td.left+ .left") %>% html_text %>%na.omit()
+  home <- html_nodes(h, "td:nth-child(5)") %>% html_text%>%na.omit()
+  as <- html_nodes(h, ".right:nth-child(4)") %>% html_text%>% as.numeric()%>%na.omit()
+  hs <- html_nodes(h, ".right~ .left+ .right") %>% html_text%>% as.numeric()%>%na.omit()
   sched <- data.frame(away,home,as,hs) %>%
     na.omit() %>%
     mutate(yearID = year)%>%
@@ -224,14 +311,13 @@ getNHLSched<- function(year){
     ungroup()
   return(sched)
 }
-t<-map_df(.x=c(2022:2023),.f=getNHLSched)
+t<-map_df(.x=c(2022:2024),.f=getNHLSched)
 x<-map_df(.x=c(2008:2021),.f=getNHLSched)
 y<-map_df(.x=c(1992:2004,2006,2007),.f=getNHLSched)
 u<-map_df(.x=c(1968:1977),.f=getNHLSched)
 z<-map_df(.x=c(1978:1991),.f=getNHLSched)
 
 sched<- rbind(t,u,x,y,z)
-Teams <- c("Mighty Ducks of Anaheim"="MDA","Minnesota North Stars" = "MNS","Oakland Seals"="OAK","Chicago Black Hawks"="CBH","California Golden Seals"="CGS","Atlanta Flames" ="ATF","Kansas City Scouts"="KCS","Cleveland Barons"="CLE","Colorado Rockies"="CLR","Hartford Whalers"="HAR","Quebec Nordiques"="QUE","Anaheim Ducks" = "ANA","Arizona Coyotes" = "ARI","Boston Bruins" = "BOS","Buffalo Sabres" = "BUF","Calgary Flames" = "CGY","Carolina Hurricanes" = "CAR","Chicago Blackhawks" = "CHI","Colorado Avalanche" = "COL","Columbus Blue Jackets" = "CBJ","Dallas Stars" = "DAL","Detroit Red Wings" = "DET","Edmonton Oilers" = "EDM","Florida Panthers" = "FLA","Los Angeles Kings" = "LAK","Minnesota Wild" = "MIN","Montreal Canadiens" = "MTL","Nashville Predators" = "NSH","New Jersey Devils" = "NJD","New York Islanders" = "NYI","New York Rangers" = "NYR","Ottawa Senators" = "OTT","Philadelphia Flyers" = "PHI","Pittsburgh Penguins" = "PIT","San Jose Sharks" = "SJS","Seattle Kraken" = "SEA","St. Louis Blues" = "STL","Tampa Bay Lightning" = "TBL","Toronto Maple Leafs" = "TOR","Vancouver Canucks" = "VAN","Vegas Golden Knights"="VEG","Washington Capitals" = "WSH", "Winnipeg Jets"="WPG","Atlanta Thrashers"="ATL","Phoenix Coyotes"="PHX")
 sched$away <-as.character(Teams[sched$away])
 sched$home <-as.character(Teams[sched$home])
 awayfs<- NHLMaster %>%
@@ -319,17 +405,16 @@ NHLMaster1<- NHLMaster%>%
   ungroup%>%
   mutate(FloStrength = (5+FloStrength)/10)
 NHLMaster <- NHLMaster1 %>%
-  select(Team,yearID, GP,WinPct,Offense,Defense,Discapline, GS,GA,SPG,TeamScore,PlayerScore,"SchedScore"="SchedFS","FloStrength", "SCChamp")%>%
+  select(-resid1,-resid2,-resid3)%>%
   mutate(Offense = round(Offense,3))%>%
   mutate(Defense = round(Defense,3))%>%
   mutate(Discapline = round(Discapline,3))%>%
-  mutate(SPG = round(SPG,3))%>%
   mutate(TeamScore = round(TeamScore,3))%>%
-  mutate(SchedScore = round(SchedScore,3))%>%
+  mutate(SchedFS = round(SchedFS,3))%>%
   mutate(PlayerScore = round(PlayerScore,3))%>%
   mutate(FloStrength = round(FloStrength,3))
 
-write_csv(NHLMaster, "/Users/seanfloersch/FloStrength/FloStrengthHistoryApp/NHLTeamsAT")
+write_csv(NHLMaster, "/Users/seanfloersch/FloStrength/HockeyApp/NHLTeamsAT.csv")
 
 
 
